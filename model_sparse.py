@@ -2,7 +2,6 @@ import torch
 import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
-#import torch.nn.parameter as Parameter
 import math
 from matplotlib import pyplot as plt
 import pdb
@@ -10,6 +9,7 @@ from torch_geometric.utils import dense_to_sparse, f1_score
 from gcn import GCNConv
 from torch_scatter import scatter_add
 import torch_sparse
+import torch_sparse_old
 from torch_geometric.utils.num_nodes import maybe_num_nodes
 from torch_geometric.utils import remove_self_loops, add_self_loops
 
@@ -41,23 +41,22 @@ class GTN(nn.Module):
         for i in range(self.num_channels):
             edge, value=H[i]
             edge, value = remove_self_loops(edge, value)
-            deg_row, deg_col = self.norm(edge.detach(), self.num_nodes, value.detach())
+            deg_row, deg_col = self.norm(edge.detach(), self.num_nodes, value)
             value = deg_col * value
             norm_H.append((edge, value))
         return norm_H
 
     def norm(self, edge_index, num_nodes, edge_weight, improved=False, dtype=None):
-        with torch.no_grad(): 
-            if edge_weight is None:
-                edge_weight = torch.ones((edge_index.size(1), ),
-                                        dtype=dtype,
-                                        device=edge_index.device)
-            edge_weight = edge_weight.view(-1)
-            assert edge_weight.size(0) == edge_index.size(1)
-            row, col = edge_index
-            deg = scatter_add(edge_weight, col, dim=0, dim_size=num_nodes)
-            deg_inv_sqrt = deg.pow(-1)
-            deg_inv_sqrt[deg_inv_sqrt == float('inf')] = 0
+        if edge_weight is None:
+            edge_weight = torch.ones((edge_index.size(1), ),
+                                    dtype=dtype,
+                                    device=edge_index.device)
+        edge_weight = edge_weight.view(-1)
+        assert edge_weight.size(0) == edge_index.size(1)
+        row, col = edge_index
+        deg = scatter_add(edge_weight.clone(), col, dim=0, dim_size=num_nodes)
+        deg_inv_sqrt = deg.pow(-1)
+        deg_inv_sqrt[deg_inv_sqrt == float('inf')] = 0
 
         return deg_inv_sqrt[row], deg_inv_sqrt[col]
 
@@ -66,9 +65,9 @@ class GTN(nn.Module):
         for i in range(self.num_layers):
             if i == 0:
                 H, W = self.layers[i](A)
-            else:
-                H = self.normalization(H)
+            else:                
                 H, W = self.layers[i](A, H)
+            H = self.normalization(H)
             Ws.append(W)
         for i in range(self.num_channels):
             if i==0:
@@ -80,7 +79,6 @@ class GTN(nn.Module):
                 X_ = torch.cat((X_,F.relu(self.gcn(X,edge_index=edge_index.detach(), edge_weight=edge_weight))), dim=1)
         X_ = self.linear1(X_)
         X_ = F.relu(X_)
-        #X_ = F.dropout(X_, p=0.5)
         y = self.linear2(X_[target_x])
         loss = self.loss(y, target)
         return loss, y, Ws
@@ -113,7 +111,7 @@ class GTLayer(nn.Module):
             a_edge, a_value = result_A[i]
             b_edge, b_value = result_B[i]
             
-            edges, values = torch_sparse.spspmm(a_edge, a_value, b_edge, b_value, self.num_nodes, self.num_nodes, self.num_nodes)
+            edges, values = torch_sparse_old.spspmm(a_edge, a_value, b_edge, b_value, self.num_nodes, self.num_nodes, self.num_nodes)
             H.append((edges, values))
         return H, W
 
@@ -125,12 +123,11 @@ class GTConv(nn.Module):
         self.out_channels = out_channels
         self.weight = nn.Parameter(torch.Tensor(out_channels,in_channels))
         self.bias = None
-        self.scale = nn.Parameter(torch.Tensor([0.1]), requires_grad=False)
         self.num_nodes = num_nodes
         self.reset_parameters()
     def reset_parameters(self):
         n = self.in_channels
-        nn.init.constant_(self.weight, 1)
+        nn.init.normal_(self.weight, std=0.01)
         if self.bias is not None:
             fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.weight)
             bound = 1 / math.sqrt(fan_in)

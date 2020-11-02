@@ -100,7 +100,7 @@ if __name__ == '__main__':
                         num_layers= num_layers)
         model.cuda()
         if adaptive_lr == 'false':
-            optimizer = torch.optim.Adam(model.parameters(), lr=0.005, weight_decay=0.001)
+            optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
         else:
             optimizer = torch.optim.Adam([{'params':model.gcn.parameters()},
                                         {'params':model.linear1.parameters()},
@@ -109,7 +109,7 @@ if __name__ == '__main__':
                                         ], lr=0.005, weight_decay=0.001)
         loss = nn.CrossEntropyLoss()
         Ws = []
-        for i in range(30):
+        for i in range(50):
             print('Epoch: ',i+1)
             for param_group in optimizer.param_groups:
                 if param_group['lr'] > 0.005:
