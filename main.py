@@ -7,6 +7,13 @@ import pdb
 import pickle
 import argparse
 from utils import f1_score
+import random
+import time
+import os
+import networkx as nx
+
+folder = "saved_models/"
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -29,8 +36,19 @@ if __name__ == '__main__':
     parser.add_argument('--adaptive_lr', type=str, default='false',
                         help='adaptive learning rate')
 
+    parser.add_argument('--experiment_name', 
+                        help='Where to store logs and models')
+
     args = parser.parse_args()
+
+    if not args.experiment_name:
+        # exp = random.randint()
+        args.experiment_name = f'GTN-Experiment'
+
+    os.makedirs(f'./saved_models/{args.experiment_name}', exist_ok=True)
+
     print(args)
+
     epochs = args.epoch
     node_dim = args.node_dim
     num_channels = args.num_channels
@@ -46,7 +64,14 @@ if __name__ == '__main__':
         edges = pickle.load(f)
     with open('data/'+args.dataset+'/labels.pkl','rb') as f:
         labels = pickle.load(f)
+
     num_nodes = edges[0].shape[0]
+    print("Current Dataset : ",args.dataset)
+    print("Number of nodes : ",num_nodes)
+    print("Node Feature shape , sample: ", node_features.shape, node_features[0])
+    print("Edges shape , sample : ", edges[0].shape, edges[0])
+    # print("labels shape , sample : ", labels[0].shape, labels[0])
+    # print("Node Feature shape : ", node_features.shape)
 
     for i,edge in enumerate(edges):
         if i ==0:
@@ -82,6 +107,9 @@ if __name__ == '__main__':
                                         {"params":model.layers.parameters(), "lr":0.5}
                                         ], lr=0.005, weight_decay=0.001)
         loss = nn.CrossEntropyLoss()
+
+        print(model)
+
         # Train & Valid & Test
         best_val_loss = 10000
         best_test_loss = 10000
@@ -89,37 +117,70 @@ if __name__ == '__main__':
         best_train_f1 = 0
         best_val_f1 = 0
         best_test_f1 = 0
+        dur_train = 0
+        dur_valid = 0
+        dur_test = 0
+        dur_total = 0
         
         for i in range(epochs):
+            ep_time = time.time()
             for param_group in optimizer.param_groups:
                 if param_group['lr'] > 0.005:
                     param_group['lr'] = param_group['lr'] * 0.9
             print('Epoch:  ',i+1)
+            print("Duration for param setting : ", time.time() - ep_time)
+            dur_train = time.time()
             model.zero_grad()
             model.train()
             loss,y_train,Ws = model(A, node_features, train_node, train_target)
             train_f1 = torch.mean(f1_score(torch.argmax(y_train.detach(),dim=1), train_target, num_classes=num_classes)).cpu().numpy()
-            print('Train - Loss: {}, Macro_F1: {}'.format(loss.detach().cpu().numpy(), train_f1))
+            dur_train = time.time() - dur_train
+            print('Train - Loss: {}, Macro_F1: {}, Duration: {}'.format(loss.detach().cpu().numpy(), train_f1, dur_train))
             loss.backward()
             optimizer.step()
+            if i == 0:
+                print("loss : ",loss)
+                print("Target : ", train_target)
+                print("Pred : ", y_train)
+            dur_valid = time.time()
             model.eval()
             # Valid
             with torch.no_grad():
                 val_loss, y_valid,_ = model.forward(A, node_features, valid_node, valid_target)
                 val_f1 = torch.mean(f1_score(torch.argmax(y_valid,dim=1), valid_target, num_classes=num_classes)).cpu().numpy()
-                print('Valid - Loss: {}, Macro_F1: {}'.format(val_loss.detach().cpu().numpy(), val_f1))
-                test_loss, y_test,W = model.forward(A, node_features, test_node, test_target)
-                test_f1 = torch.mean(f1_score(torch.argmax(y_test,dim=1), test_target, num_classes=num_classes)).cpu().numpy()
-                print('Test - Loss: {}, Macro_F1: {}\n'.format(test_loss.detach().cpu().numpy(), test_f1))
+                dur_valid = (time.time() - dur_valid)/60.0
+                print('Valid - Loss: {}, Macro_F1: {}, Duration: {}'.format(val_loss.detach().cpu().numpy(), val_f1, dur_valid))
+                # dur_test = time.time()
+                # test_loss, y_test,W = model.forward(A, node_features, test_node, test_target)
+                # test_f1 = torch.mean(f1_score(torch.argmax(y_test,dim=1), test_target, num_classes=num_classes)).cpu().numpy()
+                # dur_test = (time.time() - dur_test)/60.0
+                # print('Test - Loss: {}, Macro_F1: {}, Duration: {}'.format(test_loss.detach().cpu().numpy(), test_f1, dur_test))
             if val_f1 > best_val_f1:
                 best_val_loss = val_loss.detach().cpu().numpy()
-                best_test_loss = test_loss.detach().cpu().numpy()
+                torch.save(model.state_dict(), f'./saved_models/{args.experiment_name}/best_val_f1.pth')
+                best_model = model
+                # best_test_loss = test_loss.detach().cpu().numpy()
                 best_train_loss = loss.detach().cpu().numpy()
                 best_train_f1 = train_f1
                 best_val_f1 = val_f1
-                best_test_f1 = test_f1 
+                # best_test_f1 = test_f1
+
+            # print('Test - Loss: {}, Macro_F1: {}, Duration: {}'.format(test_loss.detach().cpu().numpy(), test_f1, dur_test))
+            ep_time = (time.time() - ep_time)/60.0
+            print("Epoch Duration : {}\n".format(ep_time))
+            dur_total += ep_time
+
+        dur_test = time.time()
+        with torch.no_grad():
+            test_loss, y_test,W = best_model.forward(A, node_features, test_node, test_target)
+            test_f1 = torch.mean(f1_score(torch.argmax(y_test,dim=1), test_target, num_classes=num_classes)).cpu().numpy()
+        best_test_loss = test_loss.detach().cpu().numpy()
+        best_test_f1 = test_f1
+        dur_test = (time.time() - dur_test)/60.0
+
         print('---------------Best Results--------------------')
         print('Train - Loss: {}, Macro_F1: {}'.format(best_train_loss, best_train_f1))
         print('Valid - Loss: {}, Macro_F1: {}'.format(best_val_loss, best_val_f1))
         print('Test - Loss: {}, Macro_F1: {}'.format(best_test_loss, best_test_f1))
+        print('Total Duration : ', dur_total/60.0)
         final_f1 += best_test_f1
