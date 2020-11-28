@@ -1,6 +1,10 @@
 from __future__ import division
 
 import torch
+import numpy as np
+import matplotlib
+import matplotlib.pyplot as plt
+import cv2
 
 
 def accuracy(pred, target):
@@ -149,3 +153,40 @@ def f1_score(pred, target, num_classes):
     score[torch.isnan(score)] = 0
 
     return score
+
+def plot_lines(train_f1, val_f1, train_loss, val_loss, ep, name, run,folder):
+
+    matplotlib.use('Agg')
+
+    epochs = np.arange(ep)
+
+    file = f'score_vs_epochs_{name}_{run}.png'
+
+    plt.plot(epochs, train_f1, label="Train F1")
+    plt.plot(epochs, val_f1, label="Valid F1")
+    plt.plot(epochs, train_loss, label="Train loss")
+    plt.plot(epochs, val_loss, label="Valid loss")
+
+    plt.xlabel("Epochs")
+    plt.ylabel("F1 scores / Loss")
+    plt.title(f"F1 Scores / Loss vs Epochs - Run {run}")
+    plt.legend()
+
+    plt.savefig(folder+file,bbox_inches='tight')
+
+
+def plot_testf1(test_f1, runs,name,folder):
+    matplotlib.use('Agg')
+
+    runs = np.arange(runs)
+
+    file = f'testF1_vs_runs_{name}.png'
+
+    plt.plot(runs, test_f1)
+
+    plt.xlabel("Total Runs")
+    plt.ylabel("Test F1")
+    plt.title(f"Test F1 vs Runs")
+    # plt.legend()
+
+    plt.savefig(folder+file,bbox_inches='tight')
